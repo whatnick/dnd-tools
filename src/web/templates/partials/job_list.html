@@ -1,0 +1,14 @@
+{% if jobs|length == 0 %}
+  <div class="muted">No jobs yet.</div>
+{% else %}
+  {% for j in jobs %}
+    <div class="card" id="job-{{ j.id }}"
+      hx-get="/jobs/{{ j.id }}" hx-trigger="load, every 1s" hx-swap="outerHTML">
+      <strong>{{ j.kind }}</strong>
+      <div class="muted">{{ j.status }}{% if j.message %} · {{ j.message }}{% endif %}</div>
+      {% if j.result_artifact_id %}
+        <div><a href="/artifacts/{{ j.result_artifact_id }}">Result</a></div>
+      {% endif %}
+    </div>
+  {% endfor %}
+{% endif %}

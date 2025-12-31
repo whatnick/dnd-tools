@@ -1,0 +1,49 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+*.pyd
+
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.pid
+
+build/
+dist/
+wheels/
+*.egg-info
+
+# Byte-compiled / optimized / DLL files
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Editor / tooling
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+
+# App-generated local artifacts (web UI)
+data/app/

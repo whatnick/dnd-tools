@@ -1,0 +1,12 @@
+{% if campaigns|length == 0 %}
+  <div class="muted">No campaigns yet.</div>
+{% else %}
+  <ul>
+    {% for c in campaigns %}
+      <li>
+        <a href="/campaigns/{{ c.id }}">{{ c.name }}</a>
+        <span class="muted">({{ c.created_at }})</span>
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Campaigns · D&D Tools{% endblock %}
+
+{% block content %}
+  <div class="grid-2">
+    <div class="card">
+      <h2 style="margin-top:0">New campaign</h2>
+      <form hx-post="/campaigns" hx-target="#campaign-list" hx-swap="innerHTML">
+        <label for="name">Name</label>
+        <input id="name" name="name" required placeholder="Dragon of Icespire Peak" />
+        <div style="margin-top:10px">
+          <button type="submit">Create</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Campaigns</h2>
+      <div id="campaign-list">
+        {% include "partials/campaign_list.html" %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

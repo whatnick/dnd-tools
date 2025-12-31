@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}{{ campaign.name }} · D&D Tools{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top:0">{{ campaign.name }}</h2>
+    <div class="muted">{{ campaign.id }}</div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3 style="margin-top:0">AI text</h3>
+
+      <h4>Campaign pack</h4>
+      <form hx-post="/campaigns/{{ campaign.id }}/generate/campaign-pack" hx-target="#job-list" hx-swap="innerHTML">
+        <label>Story prompt</label>
+        <textarea name="story_prompt" rows="5" placeholder="A dragon cult infiltrates a coastal trade city..." required></textarea>
+        <div style="margin-top:10px"><button type="submit">Generate campaign pack (maps + flow + PDF)</button></div>
+      </form>
+
+      <hr />
+
+      <h4>Character backstory</h4>
+      <form hx-post="/campaigns/{{ campaign.id }}/generate/backstory" hx-target="#artifact-list" hx-swap="innerHTML">
+        <label>Name</label>
+        <input name="name" required />
+        <label>Race</label>
+        <input name="race" required />
+        <label>Class</label>
+        <input name="char_class" required />
+        <div style="margin-top:10px"><button type="submit">Generate</button></div>
+      </form>
+
+      <hr />
+
+      <h4>Plot hooks</h4>
+      <form hx-post="/campaigns/{{ campaign.id }}/generate/plot-hooks" hx-target="#artifact-list" hx-swap="innerHTML">
+        <label>Starting setting</label>
+        <input name="setting" placeholder="a small village" />
+        <div style="margin-top:10px"><button type="submit">Generate</button></div>
+      </form>
+
+      <hr />
+
+      <h3>Map</h3>
+      <form hx-post="/campaigns/{{ campaign.id }}/generate/map" hx-target="#job-list" hx-swap="innerHTML">
+        <label>Width</label>
+        <input type="number" name="width" value="20" min="5" max="200" />
+        <label>Height</label>
+        <input type="number" name="height" value="20" min="5" max="200" />
+        <div style="margin-top:10px"><button type="submit">Generate map (PNG)</button></div>
+      </form>
+
+      <hr />
+
+      <h3>Portraits</h3>
+      <form hx-post="/campaigns/{{ campaign.id }}/upload" hx-encoding="multipart/form-data" hx-target="#upload-status" hx-swap="innerHTML">
+        <label>Upload portraits</label>
+        <input type="file" name="files" multiple />
+        <div style="margin-top:10px"><button type="submit">Upload</button></div>
+      </form>
+      <div id="upload-status" class="muted" style="margin-top:8px"></div>
+
+      <form hx-post="/campaigns/{{ campaign.id }}/generate/portraits-pdf" hx-target="#job-list" hx-swap="innerHTML" style="margin-top:12px">
+        <label>Columns</label>
+        <input type="number" name="columns" value="2" min="1" max="6" />
+        <label>Rows</label>
+        <input type="number" name="rows" value="3" min="1" max="8" />
+        <div style="margin-top:10px"><button type="submit">Generate PDF from uploads</button></div>
+      </form>
+    </div>
+
+    <div>
+      <div class="card">
+        <h3 style="margin-top:0">Jobs</h3>
+        <div id="job-list">
+          {% include "partials/job_list.html" %}
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0">Artifacts</h3>
+        <div id="artifact-list">
+          {% include "partials/artifact_list.html" %}
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

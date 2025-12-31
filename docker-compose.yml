@@ -1,0 +1,25 @@
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main
+    ports:
+      - "4000:4000"
+    environment:
+      # Provide ONE of these (or configure litellm.yaml). For single-user local, env vars are simplest.
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Optional: set a proxy master key. If set, also set LITELLM_API_KEY in the web service.
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+    command: ["--port", "4000", "--host", "0.0.0.0"]
+
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - LITELLM_BASE_URL=http://litellm:4000
+      - LITELLM_API_KEY=${LITELLM_MASTER_KEY}
+      - DND_DEFAULT_MODEL=${DND_DEFAULT_MODEL}
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - litellm
