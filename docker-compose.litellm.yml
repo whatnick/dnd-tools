@@ -1,0 +1,69 @@
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main
+    ports:
+      - "4000:4000"
+    environment:
+      # Provide ONE of these (or configure a litellm.yaml). For single-user local, env vars are simplest.
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+
+      # Optional: secure the proxy with a master key.
+      # If set, your app should send this in its requests (set LITELLM_API_KEY).
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+
+      # Enable Ollama routing in litellm.yaml
+      - OLLAMA_API_BASE=http://ollama:11434
+
+      # Optional: enable DB-backed logging/usage tracking (requires postgres service below)
+      # - DATABASE_URL=postgresql://litellm:litellm@postgres:5432/litellm
+    volumes:
+      - ./litellm.yaml:/app/config.yaml:ro
+    command: ["--port", "4000", "--host", "0.0.0.0"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health').read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # Optional: Postgres for LiteLLM logging/analytics.
+  # Uncomment DATABASE_URL above to enable.
+  # postgres:
+  #   image: postgres:16
+  #   environment:
+  #     - POSTGRES_USER=litellm
+  #     - POSTGRES_PASSWORD=litellm
+  #     - POSTGRES_DB=litellm
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - litellm_pg:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+# volumes:
+#   litellm_pg:
+
+  # Local LLM runtime (alternative to OpenAI/Claude). Pull model after first start:
+  #   docker exec -it <ollama-container> ollama pull llama3.3
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
+  # Optional Stable Diffusion sidecar (ComfyUI)
+  comfyui:
+    image: ghcr.io/comfyanonymous/comfyui:latest
+    profiles: ["sd"]
+    ports:
+      - "8188:8188"
+    volumes:
+      - ./models/comfyui:/app/models
+      - ./data/comfyui:/app/output
+    restart: unless-stopped
+
+volumes:
+  ollama:

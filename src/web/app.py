@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import random
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -17,6 +18,13 @@ from src.workflows.campaign_pack import (
     write_flowchart_dot,
     write_flowchart_mermaid,
     render_flowchart_graphviz,
+)
+from src.image_generation.comfyui import (
+    build_txt2img_workflow,
+    download_image,
+    is_configured as comfy_is_configured,
+    queue_prompt,
+    wait_for_result_image,
 )
 
 from . import db
@@ -267,6 +275,120 @@ def _job_generate_campaign_pack(job_id: str, campaign_id: str, story_prompt: str
                 title=f"Map: {name}",
                 file_path=str(map_path),
                 meta={"location": name, "width": width, "height": height},
+            )
+
+        # Optional: generate illustrations via ComfyUI (Stable Diffusion)
+        comfy_url = os.getenv("COMFYUI_BASE_URL")
+        comfy_ckpt = os.getenv("COMFYUI_CHECKPOINT")
+        if comfy_is_configured() and comfy_ckpt:
+            try:
+                mode = (os.getenv("COMFYUI_MODE") or "location").strip().lower()
+                max_images = int(os.getenv("COMFYUI_MAX_IMAGES") or 2)
+                width = int(os.getenv("COMFYUI_WIDTH") or 768)
+                height = int(os.getenv("COMFYUI_HEIGHT") or 768)
+                steps = int(os.getenv("COMFYUI_STEPS") or 8)
+                cfg = float(os.getenv("COMFYUI_CFG") or 4.0)
+
+                db.update_job(job_id=job_id, status="running", message="Generating illustrations (ComfyUI)")
+
+                negative = (
+                    "low quality, blurry, watermark, text, signature, extra limbs, "
+                    "worst quality, jpeg artifacts"
+                )
+
+                created = 0
+                seed_base = random.randint(1, 2**31 - 1)
+
+                if mode in ("location", "both"):
+                    for loc in (pack.get("locations") or [])[: max_images]:
+                        if created >= max_images:
+                            break
+                        loc_name = (loc.get("name") or "Location").strip() or "Location"
+                        summary = (loc.get("summary") or "").strip()
+                        positive = (
+                            f"fantasy top-down map illustration, {loc_name}, "
+                            f"highly detailed, parchment style, ink lines, readable pathways, no text. {summary}"
+                        )
+
+                        filename_prefix = f"campaign_{campaign_id}_location_{job_id}_{created}"
+                        wf = build_txt2img_workflow(
+                            positive=positive,
+                            negative=negative,
+                            checkpoint=comfy_ckpt,
+                            width=width,
+                            height=height,
+                            steps=steps,
+                            cfg=cfg,
+                            seed=seed_base + created,
+                            filename_prefix=filename_prefix,
+                        )
+                        prompt_id = queue_prompt(workflow=wf)
+                        ref = wait_for_result_image(prompt_id=prompt_id, timeout_s=900)
+
+                        out_path = out_dir / f"location_illustration_{created}_{job_id}.png"
+                        download_image(ref=ref, dest_path=out_path)
+                        db.create_artifact(
+                            campaign_id=campaign_id,
+                            kind="file.location_illustration_png",
+                            title=f"Location illustration: {loc_name}",
+                            file_path=str(out_path),
+                            meta={"location": loc_name, "prompt_id": prompt_id},
+                        )
+                        created += 1
+
+                if mode in ("scene", "both") and created < max_images:
+                    for scene in (pack.get("scenes") or [])[: max_images]:
+                        if created >= max_images:
+                            break
+                        title = (scene.get("title") or "Scene").strip() or "Scene"
+                        location = (scene.get("location") or "").strip()
+                        setup = (scene.get("setup") or "").strip()
+                        positive = (
+                            f"fantasy scene illustration, cinematic lighting, detailed, "
+                            f"{title}, at {location}. {setup}"
+                        )
+
+                        filename_prefix = f"campaign_{campaign_id}_scene_{job_id}_{created}"
+                        wf = build_txt2img_workflow(
+                            positive=positive,
+                            negative=negative,
+                            checkpoint=comfy_ckpt,
+                            width=width,
+                            height=height,
+                            steps=steps,
+                            cfg=cfg,
+                            seed=seed_base + created,
+                            filename_prefix=filename_prefix,
+                        )
+                        prompt_id = queue_prompt(workflow=wf)
+                        ref = wait_for_result_image(prompt_id=prompt_id, timeout_s=900)
+
+                        out_path = out_dir / f"scene_illustration_{created}_{job_id}.png"
+                        download_image(ref=ref, dest_path=out_path)
+                        db.create_artifact(
+                            campaign_id=campaign_id,
+                            kind="file.scene_illustration_png",
+                            title=f"Scene illustration: {title}",
+                            file_path=str(out_path),
+                            meta={"scene": title, "prompt_id": prompt_id},
+                        )
+                        created += 1
+
+            except Exception as e:
+                db.create_artifact(
+                    campaign_id=campaign_id,
+                    kind="text.comfyui_warning",
+                    title="ComfyUI image generation warning",
+                    text_content=str(e),
+                    meta={"comfyui_base_url": comfy_url},
+                )
+        elif comfy_is_configured() and not comfy_ckpt:
+            db.create_artifact(
+                campaign_id=campaign_id,
+                kind="text.comfyui_warning",
+                title="ComfyUI not configured (missing checkpoint)",
+                text_content="Set COMFYUI_CHECKPOINT to a checkpoint filename available in ComfyUI (models/checkpoints).",
+                meta={"comfyui_base_url": comfy_url},
             )
 
         # Printable PDF

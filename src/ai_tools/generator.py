@@ -13,10 +13,10 @@ class DnDGenerator:
                 api_key=os.getenv("LITELLM_API_KEY") or os.getenv("OPENAI_API_KEY"),
                 base_url=litellm_base_url.rstrip("/") + "/v1",
             )
-            self.model = model or os.getenv("DND_DEFAULT_MODEL") or "gpt-4o"
+            self.model = model or os.getenv("DND_DEFAULT_MODEL") or "gpt-5.2"
         else:
             self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            self.model = model or os.getenv("DND_DEFAULT_MODEL") or "gpt-4o"
+            self.model = model or os.getenv("DND_DEFAULT_MODEL") or "gpt-5.2"
 
     def generate_character_backstory(self, name, race, char_class):
         """Generate a backstory for a D&D character."""

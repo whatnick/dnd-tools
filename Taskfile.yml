@@ -1,0 +1,64 @@
+version: '3'
+
+vars:
+  PROJECT_NAME: dnd-tools
+  WEB_URL: "http://127.0.0.1:8000/campaigns"
+
+# Task runs commands in a shell. On Windows, prefer PowerShell.
+
+includes: {}
+
+tasks:
+  default:
+    desc: List tasks
+    cmds:
+      - task --list
+
+  list:
+    desc: List tasks (alias)
+    cmds:
+      - task --list
+
+  "env:ensure":
+    desc: Ensure local .env exists; prompt for missing API keys (Windows PowerShell)
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ensure-env.ps1
+
+  deps:
+    desc: Install/sync Python deps via uv
+    cmds:
+      - uv sync
+
+  test:
+    desc: Run the test suite
+    deps: [deps]
+    cmds:
+      - uv run pytest -q
+
+  "web:dev":
+    desc: Run the FastAPI app locally (reload)
+    deps: [deps, "env:ensure"]
+    cmds:
+      - uv run uvicorn src.web.app:app --reload
+
+  stack:
+    desc: Run the full Docker stack (web + litellm)
+    deps: ["env:ensure"]
+    cmds:
+      - docker compose up --build
+
+  "stack:down":
+    desc: Stop the full Docker stack
+    cmds:
+      - docker compose down
+
+  litellm:
+    desc: "Run LiteLLM proxy only (for hybrid mode: local web + dockerized litellm)"
+    deps: ["env:ensure"]
+    cmds:
+      - docker compose -f docker-compose.litellm.yml up
+
+  "litellm:down":
+    desc: Stop LiteLLM-only stack
+    cmds:
+      - docker compose -f docker-compose.litellm.yml down
