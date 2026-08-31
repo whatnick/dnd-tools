@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ollama-pull-campaign-model
+  namespace: dnd-tools
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: ollama-model-loader
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: pull-model
+          image: curlimages/curl@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13
+          args:
+            - --fail-with-body
+            - --show-error
+            - --max-time
+            - "1800"
+            - http://ollama:11434/api/pull
+            - -d
+            - '{"name":"qwen2.5:3b","stream":false}'
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

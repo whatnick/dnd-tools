@@ -21,3 +21,6 @@ dependencies = [
     "typer>=0.21.0",
     "uvicorn>=0.35.0",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

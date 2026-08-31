@@ -160,6 +160,42 @@ Campaign pack generation can optionally call ComfyUI automatically when configur
 
 For ~8GB VRAM/RAM constraints, prefer SD1.5/SD-turbo style models and keep resolutions modest.
 
+## Local kind deployment
+
+The complete campaign-generation stack can run in a local
+[kind](https://kind.sigs.k8s.io/) cluster. It includes D&D Tools, LiteLLM,
+Ollama, the `qwen2.5:3b` campaign model, and persistent volumes for application
+data and model files.
+
+Prerequisites:
+
+- Docker Desktop using the WSL2 Linux engine
+- `kubectl`
+- `kind`
+- At least 20 GB of free disk space
+
+Deploy and validate:
+
+```powershell
+task kind:deploy
+task kind:validate
+task kind:acceptance
+```
+
+Open <http://127.0.0.1:8000/campaigns>. LiteLLM and cluster Ollama are also
+exposed locally on ports `4000` and `11435` for diagnostics. Port `11435`
+avoids conflicting with a host installation of Ollama on its usual `11434`.
+The quick validation checks health and model inference; acceptance validation
+generates a complete campaign and verifies every downloadable artifact.
+
+The kind deployment deliberately runs Ollama without a Kubernetes GPU resource
+request. Docker Desktop supports the laptop GPU for standalone Linux
+containers, but does not reliably pass that GPU into kind's containerized node.
+The small local model remains practical on the available CPU and RAM. A native
+Linux Kubernetes GPU node can add `nvidia.com/gpu: 1` to the Ollama container.
+Campaign generation is bounded to 2,600 output tokens and requests JSON mode so
+local models cannot run indefinitely while producing malformed prose.
+
 ## Project Structure
 
 - `src/`: Source code for tools.

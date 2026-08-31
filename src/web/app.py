@@ -48,6 +48,11 @@ def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+@app.get("/healthz")
+def healthz() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 @app.get("/campaigns", response_class=HTMLResponse)
 def campaigns_page(request: Request):
     campaigns = db.list_campaigns()

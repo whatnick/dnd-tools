@@ -58,6 +58,26 @@ tasks:
     cmds:
       - docker compose -f docker-compose.litellm.yml up
 
+  "kind:deploy":
+    desc: Build and deploy the local D&D toolset to kind
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-kind.ps1
+
+  "kind:validate":
+    desc: Validate the local kind deployment and model inference
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-kind.ps1
+
+  "kind:acceptance":
+    desc: Generate a campaign and validate all resulting artifacts
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-campaign-kind.ps1
+
+  "kind:delete":
+    desc: Delete the local D&D Tools kind cluster
+    cmds:
+      - kind delete cluster --name dnd-tools
+
   "litellm:down":
     desc: Stop LiteLLM-only stack
     cmds:

@@ -5,10 +5,10 @@ WORKDIR /app
 # Install uv (fast, consistent installs)
 RUN pip install --no-cache-dir uv
 
-COPY pyproject.toml README.md /app/
+COPY pyproject.toml uv.lock README.md /app/
 COPY src /app/src
 
-RUN uv sync --frozen || uv sync
+RUN uv sync --frozen
 
 EXPOSE 8000
 

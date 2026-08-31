@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -10,11 +11,39 @@ from pathlib import Path
 from typing import Any
 
 from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 
 from src.ai_tools.generator import DnDGenerator
 
 
 _JSON_BLOCK_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
+
+
+class _CampaignPDF(FPDF):
+    def multi_cell(self, *args: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault("new_x", XPos.LMARGIN)
+        kwargs.setdefault("new_y", YPos.NEXT)
+        return super().multi_cell(*args, **kwargs)
+
+
+def _pdf_safe(value: Any) -> Any:
+    """Convert generated text to characters supported by FPDF core fonts."""
+    if isinstance(value, str):
+        value = (
+            value.replace("\u2013", "-")
+            .replace("\u2014", "-")
+            .replace("\u2018", "'")
+            .replace("\u2019", "'")
+            .replace("\u201c", '"')
+            .replace("\u201d", '"')
+            .replace("\u2192", "->")
+        )
+        return value.encode("latin-1", errors="replace").decode("latin-1")
+    if isinstance(value, dict):
+        return {key: _pdf_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_pdf_safe(item) for item in value]
+    return value
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -138,15 +167,20 @@ Return JSON with this schema (use these exact keys):
 }}
 
 Constraints:
-- 4–6 locations.
-- 6–10 NPCs.
-- 5–8 scenes.
-- Decision flow must have 8–14 nodes with ids like N1, N2, ...
+- Return no more than 2,200 tokens.
+- Exactly 3 locations, each with exactly 2 short encounters.
+- Exactly 4 NPCs.
+- Exactly 4 scenes, each with exactly 2 short dialog lines and 2 player options.
+- Exactly 6 decision-flow nodes with ids N1 through N6.
+- Exactly 2 short handouts.
+- Keep every summary, setup, outcome, motivation, secret, and handout under 35 words.
 - Keep content PG-13.
 """
 
     resp = gen.client.chat.completions.create(
         model=gen.model,
+        max_tokens=int(os.getenv("DND_CAMPAIGN_MAX_TOKENS") or 2600),
+        response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -160,8 +194,9 @@ Constraints:
 def write_campaign_pack_pdf(*, pack: dict[str, Any], output_pdf: Path) -> None:
     """Write a printable PDF summary of the campaign pack."""
     output_pdf.parent.mkdir(parents=True, exist_ok=True)
+    pack = _pdf_safe(pack)
 
-    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf = _CampaignPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
 
@@ -208,7 +243,7 @@ def write_campaign_pack_pdf(*, pack: dict[str, Any], output_pdf: Path) -> None:
 
     section("NPCs")
     for npc in pack.get("npcs", []) or []:
-        line = f"- {npc.get('name','')} ({npc.get('race','')}) — {npc.get('role','')}"
+        line = f"- {npc.get('name','')} ({npc.get('race','')}) - {npc.get('role','')}"
         pdf.set_font("Helvetica", style="B", size=11)
         pdf.multi_cell(0, 6, line)
         pdf.set_font("Helvetica", size=11)
@@ -234,7 +269,7 @@ def write_campaign_pack_pdf(*, pack: dict[str, Any], output_pdf: Path) -> None:
         if opts:
             pdf.set_text_color(60, 60, 60)
             for o in opts[:6]:
-                pdf.multi_cell(0, 6, f"Option: {o.get('label','')} → {o.get('outcome','')}")
+                pdf.multi_cell(0, 6, f"Option: {o.get('label','')} -> {o.get('outcome','')}")
             pdf.set_text_color(0, 0, 0)
         pdf.ln(1)
 
