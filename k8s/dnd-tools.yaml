@@ -43,6 +43,83 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: nano-banana-mcp
+  namespace: dnd-tools
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nano-banana-mcp
+  template:
+    metadata:
+      labels:
+        app: nano-banana-mcp
+    spec:
+      containers:
+        - name: mcp
+          image: nano-banana-2-mcp-rs:local
+          imagePullPolicy: Never
+          env:
+            - name: NANO_BANANA_TRANSPORT
+              value: streamable-http
+            - name: NANO_BANANA_BIND_ADDRESS
+              value: 0.0.0.0:3000
+            - name: NANO_BANANA_OUTPUT_DIR
+              value: /app/generated_imgs
+            - name: NANO_BANANA_ALLOWED_HOSTS
+              value: nano-banana-mcp,nano-banana-mcp.dnd-tools.svc
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: nano-banana-mcp
+                  key: GEMINI_API_KEY
+                  optional: true
+          ports:
+            - name: http
+              containerPort: 3000
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - name: generated-images
+              mountPath: /app/generated_imgs
+      volumes:
+        - name: generated-images
+          emptyDir:
+            sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nano-banana-mcp
+  namespace: dnd-tools
+spec:
+  selector:
+    app: nano-banana-mcp
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: ollama
   namespace: dnd-tools
 spec:
@@ -207,6 +284,10 @@ spec:
               value: campaign-local
             - name: DND_CAMPAIGN_MAX_TOKENS
               value: "2600"
+            - name: NANO_BANANA_MCP_URL
+              value: http://nano-banana-mcp:3000/mcp
+            - name: CAMPAIGN_IMAGE_PROVIDERS
+              value: none
           ports:
             - name: http
               containerPort: 8000

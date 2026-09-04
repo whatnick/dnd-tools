@@ -19,6 +19,7 @@ def connect() -> sqlite3.Connection:
     data_dir().mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path())
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
@@ -60,11 +61,26 @@ def init_db() -> None:
                 FOREIGN KEY (result_artifact_id) REFERENCES artifact(id) ON DELETE SET NULL
             );
 
+            CREATE TABLE IF NOT EXISTS actor (
+                id TEXT PRIMARY KEY,
+                campaign_id TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK (kind IN ('character', 'monster')),
+                name TEXT NOT NULL,
+                schema_version TEXT NOT NULL,
+                data_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (campaign_id) REFERENCES campaign(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_artifact_campaign_created_at
                 ON artifact (campaign_id, created_at DESC);
 
             CREATE INDEX IF NOT EXISTS idx_job_campaign_updated_at
                 ON job (campaign_id, updated_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_actor_campaign_kind_name
+                ON actor (campaign_id, kind, name);
             """
         )
 
@@ -96,6 +112,18 @@ class Job:
     status: str
     message: str | None
     result_artifact_id: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class Actor:
+    id: str
+    campaign_id: str
+    kind: str
+    name: str
+    schema_version: str
+    data: dict[str, Any]
     created_at: str
     updated_at: str
 
@@ -133,6 +161,96 @@ def get_campaign(campaign_id: str) -> Campaign | None:
         return None
 
     return Campaign(id=row["id"], name=row["name"], created_at=row["created_at"])
+
+
+def create_actor(
+    *,
+    campaign_id: str,
+    kind: str,
+    name: str,
+    schema_version: str,
+    data: dict[str, Any],
+) -> Actor:
+    actor_id = uuid.uuid4().hex
+    now = _utcnow_iso()
+    data_json = json.dumps(data, ensure_ascii=False)
+
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO actor (
+                id, campaign_id, kind, name, schema_version, data_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (actor_id, campaign_id, kind, name, schema_version, data_json, now, now),
+        )
+
+    return Actor(
+        id=actor_id,
+        campaign_id=campaign_id,
+        kind=kind,
+        name=name,
+        schema_version=schema_version,
+        data=json.loads(data_json),
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def list_actors(campaign_id: str, *, kind: str | None = None) -> list[Actor]:
+    query = """
+        SELECT id, campaign_id, kind, name, schema_version, data_json, created_at, updated_at
+        FROM actor
+        WHERE campaign_id = ?
+    """
+    params: list[Any] = [campaign_id]
+    if kind is not None:
+        query += " AND kind = ?"
+        params.append(kind)
+    query += " ORDER BY name COLLATE NOCASE"
+
+    with connect() as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    return [
+        Actor(
+            id=row["id"],
+            campaign_id=row["campaign_id"],
+            kind=row["kind"],
+            name=row["name"],
+            schema_version=row["schema_version"],
+            data=json.loads(row["data_json"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+        for row in rows
+    ]
+
+
+def get_actor(actor_id: str) -> Actor | None:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, campaign_id, kind, name, schema_version, data_json, created_at, updated_at
+            FROM actor
+            WHERE id = ?
+            """,
+            (actor_id,),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    return Actor(
+        id=row["id"],
+        campaign_id=row["campaign_id"],
+        kind=row["kind"],
+        name=row["name"],
+        schema_version=row["schema_version"],
+        data=json.loads(row["data_json"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
 
 
 def create_artifact(

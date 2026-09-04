@@ -20,6 +20,58 @@ if (-not $campaignMatch.Success) {
 }
 
 $campaignId = $campaignMatch.Groups[1].Value
+
+$characterResponse = Invoke-WebRequest `
+    -Uri "$baseUrl/campaigns/$campaignId/characters" `
+    -Method Post `
+    -ContentType "application/x-www-form-urlencoded" `
+    -Body @{
+        name = "Aria"
+        ancestry = "Human"
+        class_name = "Fighter"
+        level = 5
+        armor_class = 18
+        hit_point_max = 44
+        strength = 18
+        dexterity = 14
+        constitution = 16
+        intelligence = 8
+        wisdom = 12
+        charisma = 10
+        perception_proficient = "true"
+    } `
+    -UseBasicParsing
+if ($characterResponse.Content -notmatch "Passive Perception 14") {
+    throw "Character derived statistics were not rendered correctly."
+}
+
+$monsterResponse = Invoke-WebRequest `
+    -Uri "$baseUrl/campaigns/$campaignId/monsters" `
+    -Method Post `
+    -ContentType "application/x-www-form-urlencoded" `
+    -Body @{
+        name = "Ash Drake"
+        size = "Large"
+        creature_type = "dragon"
+        challenge_rating = 5
+        armor_class = 17
+        hit_point_max = 95
+        speed = "40 ft., fly 60 ft."
+        primary_ability = "strength"
+        strength = 18
+        dexterity = 14
+        constitution = 16
+        intelligence = 8
+        wisdom = 12
+        charisma = 10
+        traits = "Heated Body"
+        actions = "Bite`nCinder Breath"
+    } `
+    -UseBasicParsing
+if ($monsterResponse.Content -notmatch "Attack \+7") {
+    throw "Monster derived statistics were not rendered correctly."
+}
+
 $story = [uri]::EscapeDataString(
     "A lost observatory above a storm-wrapped mountain town."
 )
@@ -61,6 +113,9 @@ do {
 
 if (-not $job.Success -or $status -notlike "done*") {
     throw "Campaign generation did not complete within 15 minutes."
+}
+if ($page -notmatch "Aria" -or $page -notmatch "Ash Drake") {
+    throw "Campaign actors did not persist during campaign generation."
 }
 
 $requiredKinds = @(

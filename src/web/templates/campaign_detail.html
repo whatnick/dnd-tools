@@ -87,4 +87,124 @@
       </div>
     </div>
   </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3 style="margin-top:0">Characters</h3>
+      <form hx-post="/campaigns/{{ campaign.id }}/characters" hx-target="#character-list" hx-swap="innerHTML">
+        <label>Name</label>
+        <input name="name" required maxlength="100" />
+        <div class="grid-2">
+          <div>
+            <label>Ancestry</label>
+            <input name="ancestry" required maxlength="100" />
+          </div>
+          <div>
+            <label>Class</label>
+            <input name="class_name" required maxlength="100" />
+          </div>
+          <div>
+            <label>Level</label>
+            <input type="number" name="level" value="1" min="1" max="20" required />
+          </div>
+          <div>
+            <label>Armor class</label>
+            <input type="number" name="armor_class" value="10" min="1" max="40" required />
+          </div>
+          <div>
+            <label>Maximum hit points</label>
+            <input type="number" name="hit_point_max" value="10" min="1" max="1000" required />
+          </div>
+          <div>
+            <label>
+              <input type="checkbox" name="perception_proficient" value="true" style="width:auto" />
+              Perception proficiency
+            </label>
+          </div>
+        </div>
+        <h4>Ability scores</h4>
+        <div class="ability-grid">
+          {% for ability in ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] %}
+            <div>
+              <label>{{ ability|capitalize }}</label>
+              <input type="number" name="{{ ability }}" value="10" min="1" max="30" required />
+            </div>
+          {% endfor %}
+        </div>
+        <label>Notes</label>
+        <textarea name="notes" rows="2" maxlength="4000"></textarea>
+        <div style="margin-top:10px"><button type="submit">Add character</button></div>
+      </form>
+      <div id="character-list">
+        {% with actors=characters, actor_kind="character" %}
+          {% include "partials/actor_list.html" %}
+        {% endwith %}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Monsters</h3>
+      <form hx-post="/campaigns/{{ campaign.id }}/monsters" hx-target="#monster-list" hx-swap="innerHTML">
+        <label>Name</label>
+        <input name="name" required maxlength="100" />
+        <div class="grid-2">
+          <div>
+            <label>Size</label>
+            <select name="size">
+              {% for size in ["Tiny", "Small", "Medium", "Large", "Huge", "Gargantuan"] %}
+                <option value="{{ size }}" {% if size == "Medium" %}selected{% endif %}>{{ size }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>Creature type</label>
+            <input name="creature_type" value="beast" required maxlength="100" />
+          </div>
+          <div>
+            <label>Challenge rating</label>
+            <input type="number" name="challenge_rating" value="1" min="0" max="30" step="0.125" required />
+          </div>
+          <div>
+            <label>Primary ability</label>
+            <select name="primary_ability">
+              {% for ability in ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] %}
+                <option value="{{ ability }}">{{ ability|capitalize }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>Armor class</label>
+            <input type="number" name="armor_class" value="12" min="1" max="40" required />
+          </div>
+          <div>
+            <label>Maximum hit points</label>
+            <input type="number" name="hit_point_max" value="20" min="1" max="5000" required />
+          </div>
+        </div>
+        <label>Speed</label>
+        <input name="speed" value="30 ft." required maxlength="200" />
+        <h4>Ability scores</h4>
+        <div class="ability-grid">
+          {% for ability in ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] %}
+            <div>
+              <label>{{ ability|capitalize }}</label>
+              <input type="number" name="{{ ability }}" value="10" min="1" max="30" required />
+            </div>
+          {% endfor %}
+        </div>
+        <label>Traits (one per line)</label>
+        <textarea name="traits" rows="2"></textarea>
+        <label>Actions (one per line)</label>
+        <textarea name="actions" rows="3"></textarea>
+        <label>Notes</label>
+        <textarea name="notes" rows="2" maxlength="4000"></textarea>
+        <div style="margin-top:10px"><button type="submit">Add monster</button></div>
+      </form>
+      <div id="monster-list">
+        {% with actors=monsters, actor_kind="monster" %}
+          {% include "partials/actor_list.html" %}
+        {% endwith %}
+      </div>
+    </div>
+  </div>
 {% endblock %}

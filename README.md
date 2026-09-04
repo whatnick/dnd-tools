@@ -2,6 +2,10 @@
 
 A modern Python environment for image processing, map making, and AI-powered Dungeons & Dragons tools.
 
+See [ROADMAP.md](ROADMAP.md) for the planned connected services, character and
+monster generation, encounter assistance, visual pipeline, and campaign
+management milestones.
+
 ## Features
 
 - **Image Processing**: Tools for resizing, applying vintage filters, and adding borders to maps and character art.
@@ -147,7 +151,7 @@ The compose stacks include an `ollama` service and a LiteLLM config that exposes
 
 3. Set `DND_DEFAULT_MODEL=llama3.3` to use it via LiteLLM.
 
-### Stable Diffusion (images/maps)
+### Campaign image providers
 
 Both compose files also include an optional ComfyUI sidecar (profile `sd`):
 - Start it with: `docker compose --profile sd up --build`
@@ -156,7 +160,22 @@ Both compose files also include an optional ComfyUI sidecar (profile `sd`):
 Campaign pack generation can optionally call ComfyUI automatically when configured:
 - Set `COMFYUI_BASE_URL=http://localhost:8188`
 - Set `COMFYUI_CHECKPOINT` to a checkpoint filename available in ComfyUI (models/checkpoints)
-- Optional controls: `COMFYUI_MAX_IMAGES`, `COMFYUI_MODE` (`location|scene|both`), `COMFYUI_WIDTH/HEIGHT`, `COMFYUI_STEPS`, `COMFYUI_CFG`
+- Optional controls: `COMFYUI_WIDTH/HEIGHT`, `COMFYUI_STEPS`, `COMFYUI_CFG`
+
+[Nano Banana 2 MCP](https://github.com/whatnick/nano-banana-2-mcp-rs) is
+supported as a second, independent provider:
+
+- Set `NANO_BANANA_MCP_URL=http://localhost:3000/mcp`.
+- Configure `GEMINI_API_KEY` on the MCP service, not on D&D Tools.
+- Tune `NANO_BANANA_RESOLUTION`, `NANO_BANANA_ASPECT_RATIO`, and
+  `NANO_BANANA_THINKING` as needed.
+
+Use `CAMPAIGN_IMAGE_PROVIDERS=auto`, `comfyui`, `nano-banana`, `both`, or
+`none`. Shared controls are `CAMPAIGN_IMAGE_MODE` (`location|scene|both`) and
+`CAMPAIGN_IMAGE_MAX_IMAGES`. Both providers consume the same visual briefs and
+store provider, prompt, and generation settings with each campaign artifact.
+A failure in one provider creates a provider-specific warning without failing
+the campaign or stopping the other provider.
 
 For ~8GB VRAM/RAM constraints, prefer SD1.5/SD-turbo style models and keep resolutions modest.
 
@@ -164,8 +183,8 @@ For ~8GB VRAM/RAM constraints, prefer SD1.5/SD-turbo style models and keep resol
 
 The complete campaign-generation stack can run in a local
 [kind](https://kind.sigs.k8s.io/) cluster. It includes D&D Tools, LiteLLM,
-Ollama, the `qwen2.5:3b` campaign model, and persistent volumes for application
-data and model files.
+Ollama, the `qwen2.5:3b` campaign model, Nano Banana's Streamable HTTP MCP
+service, and persistent volumes for application data and model files.
 
 Prerequisites:
 
@@ -173,6 +192,9 @@ Prerequisites:
 - `kubectl`
 - `kind`
 - At least 20 GB of free disk space
+- A local checkout of `nano-banana-2-mcp-rs` at
+  `\\wsl.localhost\Ubuntu-22.04\home\tisham\dev\nano-banana-2-mcp-rs`, or
+  `NANO_BANANA_SOURCE` set to its path
 
 Deploy and validate:
 
@@ -186,7 +208,23 @@ Open <http://127.0.0.1:8000/campaigns>. LiteLLM and cluster Ollama are also
 exposed locally on ports `4000` and `11435` for diagnostics. Port `11435`
 avoids conflicting with a host installation of Ollama on its usual `11434`.
 The quick validation checks health and model inference; acceptance validation
-generates a complete campaign and verifies every downloadable artifact.
+checks MCP discovery, generates a complete campaign, and verifies every
+downloadable artifact.
+
+Nano Banana starts without a Gemini key so discovery and MCP integration can be
+tested without making paid image calls. To enable it:
+
+```powershell
+kubectl create secret generic nano-banana-mcp --namespace dnd-tools `
+  --from-literal=GEMINI_API_KEY="$env:GEMINI_API_KEY"
+kubectl --namespace dnd-tools rollout restart deployment/nano-banana-mcp
+kubectl --namespace dnd-tools set env deployment/dnd-tools `
+  CAMPAIGN_IMAGE_PROVIDERS=nano-banana
+```
+
+Set the last value to `both` when a reachable ComfyUI service and checkpoint
+are also configured. The D&D Tools pod receives only the MCP URL; the Gemini
+credential remains isolated in the image-service pod.
 
 The kind deployment deliberately runs Ollama without a Kubernetes GPU resource
 request. Docker Desktop supports the laptop GPU for standalone Linux

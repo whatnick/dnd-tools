@@ -13,10 +13,11 @@
       .row { display: flex; gap: 12px; flex-wrap: wrap; }
       .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 12px 0; }
       label { display: block; margin: 8px 0 4px; }
-      input, textarea { width: 100%; padding: 8px; }
+      input, textarea, select { width: 100%; padding: 8px; }
       button { padding: 8px 12px; }
       pre { white-space: pre-wrap; }
       .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .ability-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
       @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
     </style>
   </head>

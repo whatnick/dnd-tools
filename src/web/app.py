@@ -6,10 +6,12 @@ import random
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError
 
 from src.ai_tools.generator import DnDGenerator
+from src.domain.actors import AbilityScores, CharacterSheet, MonsterSheet
 from src.image_processing.portrait_pdf_gen import generate_pdf_from_dir
 from src.map_making.generator import generate_simple_map
 from src.workflows.campaign_pack import (
@@ -26,6 +28,8 @@ from src.image_generation.comfyui import (
     queue_prompt,
     wait_for_result_image,
 )
+from src.image_generation.campaign_visuals import build_campaign_visual_briefs
+from src.image_generation.nano_banana_mcp import NanoBananaMcpClient
 
 from . import db
 from .paths import campaign_artifacts_dir, campaign_uploads_dir
@@ -53,6 +57,47 @@ def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _selected_image_providers(
+    comfy_url: str | None,
+    nano_banana_url: str | None,
+) -> set[str]:
+    configured = (os.getenv("CAMPAIGN_IMAGE_PROVIDERS") or "auto").strip().lower()
+    if configured == "auto":
+        providers = set()
+        if comfy_url:
+            providers.add("comfyui")
+        if nano_banana_url:
+            providers.add("nano-banana")
+        return providers
+    if configured in {"", "none", "disabled"}:
+        return set()
+    if configured == "both":
+        return {"comfyui", "nano-banana"}
+    return {
+        provider.strip()
+        for provider in configured.split(",")
+        if provider.strip() in {"comfyui", "nano-banana"}
+    }
+
+
+@app.get("/api/image-providers")
+def image_providers() -> dict[str, object]:
+    comfy_url = os.getenv("COMFYUI_BASE_URL")
+    nano_banana_url = os.getenv("NANO_BANANA_MCP_URL")
+    selected = _selected_image_providers(comfy_url, nano_banana_url)
+    return {
+        "selected": sorted(selected),
+        "comfyui": {
+            "configured": bool(comfy_url and os.getenv("COMFYUI_CHECKPOINT")),
+            "base_url": comfy_url,
+        },
+        "nano_banana": {
+            "configured": bool(nano_banana_url),
+            "endpoint": nano_banana_url,
+        },
+    }
+
+
 @app.get("/campaigns", response_class=HTMLResponse)
 def campaigns_page(request: Request):
     campaigns = db.list_campaigns()
@@ -78,6 +123,8 @@ def campaign_detail(request: Request, campaign_id: str):
 
     artifacts = db.list_artifacts(campaign_id)
     jobs = db.list_jobs(campaign_id)
+    characters = db.list_actors(campaign_id, kind="character")
+    monsters = db.list_actors(campaign_id, kind="monster")
 
     return templates.TemplateResponse(
         "campaign_detail.html",
@@ -86,6 +133,8 @@ def campaign_detail(request: Request, campaign_id: str):
             "campaign": campaign,
             "artifacts": artifacts,
             "jobs": jobs,
+            "characters": characters,
+            "monsters": monsters,
         },
     )
 
@@ -103,6 +152,167 @@ def _render_job_list(request: Request, campaign_id: str):
     return templates.TemplateResponse(
         "partials/job_list.html", {"request": request, "jobs": jobs}
     )
+
+
+def _render_actor_list(request: Request, campaign_id: str, kind: str):
+    actors = db.list_actors(campaign_id, kind=kind)
+    return templates.TemplateResponse(
+        "partials/actor_list.html",
+        {"request": request, "actors": actors, "actor_kind": kind},
+    )
+
+
+def _require_campaign(campaign_id: str) -> None:
+    if db.get_campaign(campaign_id) is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+
+def _ability_scores(
+    strength: int,
+    dexterity: int,
+    constitution: int,
+    intelligence: int,
+    wisdom: int,
+    charisma: int,
+) -> AbilityScores:
+    return AbilityScores(
+        strength=strength,
+        dexterity=dexterity,
+        constitution=constitution,
+        intelligence=intelligence,
+        wisdom=wisdom,
+        charisma=charisma,
+    )
+
+
+def _lines(value: str) -> tuple[str, ...]:
+    return tuple(line.strip() for line in value.splitlines() if line.strip())
+
+
+@app.get("/actors/{actor_id}.json")
+def export_actor(actor_id: str):
+    actor = db.get_actor(actor_id)
+    if actor is None:
+        raise HTTPException(status_code=404, detail="Actor not found")
+    return JSONResponse(actor.data)
+
+
+@app.post("/campaigns/{campaign_id}/characters", response_class=HTMLResponse)
+def create_character(
+    request: Request,
+    campaign_id: str,
+    name: str = Form(...),
+    ancestry: str = Form(...),
+    class_name: str = Form(...),
+    level: int = Form(...),
+    armor_class: int = Form(...),
+    hit_point_max: int = Form(...),
+    strength: int = Form(...),
+    dexterity: int = Form(...),
+    constitution: int = Form(...),
+    intelligence: int = Form(...),
+    wisdom: int = Form(...),
+    charisma: int = Form(...),
+    perception_proficient: bool = Form(False),
+    notes: str = Form(""),
+):
+    _require_campaign(campaign_id)
+    try:
+        character = CharacterSheet(
+            name=name,
+            ancestry=ancestry,
+            class_name=class_name,
+            level=level,
+            armor_class=armor_class,
+            hit_point_max=hit_point_max,
+            perception_proficient=perception_proficient,
+            abilities=_ability_scores(
+                strength,
+                dexterity,
+                constitution,
+                intelligence,
+                wisdom,
+                charisma,
+            ),
+            notes=notes,
+        )
+    except ValidationError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=error.errors(include_context=False),
+        ) from error
+
+    data = character.model_dump(mode="json")
+    db.create_actor(
+        campaign_id=campaign_id,
+        kind=character.kind,
+        name=character.name,
+        schema_version=character.schema_version,
+        data=data,
+    )
+    return _render_actor_list(request, campaign_id, "character")
+
+
+@app.post("/campaigns/{campaign_id}/monsters", response_class=HTMLResponse)
+def create_monster(
+    request: Request,
+    campaign_id: str,
+    name: str = Form(...),
+    size: str = Form(...),
+    creature_type: str = Form(...),
+    challenge_rating: float = Form(...),
+    armor_class: int = Form(...),
+    hit_point_max: int = Form(...),
+    speed: str = Form(...),
+    primary_ability: str = Form(...),
+    strength: int = Form(...),
+    dexterity: int = Form(...),
+    constitution: int = Form(...),
+    intelligence: int = Form(...),
+    wisdom: int = Form(...),
+    charisma: int = Form(...),
+    traits: str = Form(""),
+    actions: str = Form(""),
+    notes: str = Form(""),
+):
+    _require_campaign(campaign_id)
+    try:
+        monster = MonsterSheet(
+            name=name,
+            size=size,
+            creature_type=creature_type,
+            challenge_rating=challenge_rating,
+            armor_class=armor_class,
+            hit_point_max=hit_point_max,
+            speed=speed,
+            primary_ability=primary_ability,
+            abilities=_ability_scores(
+                strength,
+                dexterity,
+                constitution,
+                intelligence,
+                wisdom,
+                charisma,
+            ),
+            traits=_lines(traits),
+            actions=_lines(actions),
+            notes=notes,
+        )
+    except ValidationError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=error.errors(include_context=False),
+        ) from error
+
+    data = monster.model_dump(mode="json")
+    db.create_actor(
+        campaign_id=campaign_id,
+        kind=monster.kind,
+        name=monster.name,
+        schema_version=monster.schema_version,
+        data=data,
+    )
+    return _render_actor_list(request, campaign_id, "monster")
 
 
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)
@@ -282,102 +492,103 @@ def _job_generate_campaign_pack(job_id: str, campaign_id: str, story_prompt: str
                 meta={"location": name, "width": width, "height": height},
             )
 
-        # Optional: generate illustrations via ComfyUI (Stable Diffusion)
+        # Optional providers consume the same campaign visual briefs.
         comfy_url = os.getenv("COMFYUI_BASE_URL")
         comfy_ckpt = os.getenv("COMFYUI_CHECKPOINT")
-        if comfy_is_configured() and comfy_ckpt:
+        nano_banana_url = os.getenv("NANO_BANANA_MCP_URL")
+        providers = _selected_image_providers(comfy_url, nano_banana_url)
+        briefs = []
+        if providers:
             try:
-                mode = (os.getenv("COMFYUI_MODE") or "location").strip().lower()
-                max_images = int(os.getenv("COMFYUI_MAX_IMAGES") or 2)
+                mode = (
+                    os.getenv("CAMPAIGN_IMAGE_MODE")
+                    or os.getenv("COMFYUI_MODE")
+                    or "location"
+                ).strip().lower()
+                if mode not in {"location", "scene", "both"}:
+                    raise ValueError(
+                        "CAMPAIGN_IMAGE_MODE must be location, scene, or both"
+                    )
+                max_images = int(
+                    os.getenv("CAMPAIGN_IMAGE_MAX_IMAGES")
+                    or os.getenv("COMFYUI_MAX_IMAGES")
+                    or 2
+                )
+                if not 1 <= max_images <= 10:
+                    raise ValueError(
+                        "CAMPAIGN_IMAGE_MAX_IMAGES must be between 1 and 10"
+                    )
+                briefs = build_campaign_visual_briefs(
+                    pack,
+                    mode=mode,
+                    max_images=max_images,
+                )
+            except (TypeError, ValueError) as error:
+                db.create_artifact(
+                    campaign_id=campaign_id,
+                    kind="text.image_provider_warning",
+                    title="Campaign image configuration warning",
+                    text_content=str(error),
+                    meta={"providers": sorted(providers)},
+                )
+                providers = set()
+
+        if "comfyui" in providers and comfy_is_configured() and comfy_ckpt:
+            try:
                 width = int(os.getenv("COMFYUI_WIDTH") or 768)
                 height = int(os.getenv("COMFYUI_HEIGHT") or 768)
                 steps = int(os.getenv("COMFYUI_STEPS") or 8)
                 cfg = float(os.getenv("COMFYUI_CFG") or 4.0)
 
-                db.update_job(job_id=job_id, status="running", message="Generating illustrations (ComfyUI)")
+                db.update_job(
+                    job_id=job_id,
+                    status="running",
+                    message="Generating illustrations (ComfyUI)",
+                )
 
                 negative = (
                     "low quality, blurry, watermark, text, signature, extra limbs, "
                     "worst quality, jpeg artifacts"
                 )
-
-                created = 0
                 seed_base = random.randint(1, 2**31 - 1)
-
-                if mode in ("location", "both"):
-                    for loc in (pack.get("locations") or [])[: max_images]:
-                        if created >= max_images:
-                            break
-                        loc_name = (loc.get("name") or "Location").strip() or "Location"
-                        summary = (loc.get("summary") or "").strip()
-                        positive = (
-                            f"fantasy top-down map illustration, {loc_name}, "
-                            f"highly detailed, parchment style, ink lines, readable pathways, no text. {summary}"
-                        )
-
-                        filename_prefix = f"campaign_{campaign_id}_location_{job_id}_{created}"
-                        wf = build_txt2img_workflow(
-                            positive=positive,
-                            negative=negative,
-                            checkpoint=comfy_ckpt,
-                            width=width,
-                            height=height,
-                            steps=steps,
-                            cfg=cfg,
-                            seed=seed_base + created,
-                            filename_prefix=filename_prefix,
-                        )
-                        prompt_id = queue_prompt(workflow=wf)
-                        ref = wait_for_result_image(prompt_id=prompt_id, timeout_s=900)
-
-                        out_path = out_dir / f"location_illustration_{created}_{job_id}.png"
-                        download_image(ref=ref, dest_path=out_path)
-                        db.create_artifact(
-                            campaign_id=campaign_id,
-                            kind="file.location_illustration_png",
-                            title=f"Location illustration: {loc_name}",
-                            file_path=str(out_path),
-                            meta={"location": loc_name, "prompt_id": prompt_id},
-                        )
-                        created += 1
-
-                if mode in ("scene", "both") and created < max_images:
-                    for scene in (pack.get("scenes") or [])[: max_images]:
-                        if created >= max_images:
-                            break
-                        title = (scene.get("title") or "Scene").strip() or "Scene"
-                        location = (scene.get("location") or "").strip()
-                        setup = (scene.get("setup") or "").strip()
-                        positive = (
-                            f"fantasy scene illustration, cinematic lighting, detailed, "
-                            f"{title}, at {location}. {setup}"
-                        )
-
-                        filename_prefix = f"campaign_{campaign_id}_scene_{job_id}_{created}"
-                        wf = build_txt2img_workflow(
-                            positive=positive,
-                            negative=negative,
-                            checkpoint=comfy_ckpt,
-                            width=width,
-                            height=height,
-                            steps=steps,
-                            cfg=cfg,
-                            seed=seed_base + created,
-                            filename_prefix=filename_prefix,
-                        )
-                        prompt_id = queue_prompt(workflow=wf)
-                        ref = wait_for_result_image(prompt_id=prompt_id, timeout_s=900)
-
-                        out_path = out_dir / f"scene_illustration_{created}_{job_id}.png"
-                        download_image(ref=ref, dest_path=out_path)
-                        db.create_artifact(
-                            campaign_id=campaign_id,
-                            kind="file.scene_illustration_png",
-                            title=f"Scene illustration: {title}",
-                            file_path=str(out_path),
-                            meta={"scene": title, "prompt_id": prompt_id},
-                        )
-                        created += 1
+                for index, brief in enumerate(briefs):
+                    filename_prefix = (
+                        f"campaign_{campaign_id}_{brief.subject_kind}_{job_id}_{index}"
+                    )
+                    workflow = build_txt2img_workflow(
+                        positive=brief.prompt,
+                        negative=negative,
+                        checkpoint=comfy_ckpt,
+                        width=width,
+                        height=height,
+                        steps=steps,
+                        cfg=cfg,
+                        seed=seed_base + index,
+                        filename_prefix=filename_prefix,
+                    )
+                    prompt_id = queue_prompt(workflow=workflow)
+                    ref = wait_for_result_image(prompt_id=prompt_id, timeout_s=900)
+                    out_path = (
+                        out_dir
+                        / f"{brief.subject_kind}_illustration_comfyui_{index}_{job_id}.png"
+                    )
+                    download_image(ref=ref, dest_path=out_path)
+                    db.create_artifact(
+                        campaign_id=campaign_id,
+                        kind=f"file.{brief.subject_kind}_illustration_png",
+                        title=f"{brief.subject_kind.title()} illustration: {brief.subject_name}",
+                        file_path=str(out_path),
+                        meta={
+                            **brief.metadata,
+                            "provider": "comfyui",
+                            "prompt": brief.prompt,
+                            "prompt_id": prompt_id,
+                            "width": width,
+                            "height": height,
+                            "steps": steps,
+                            "cfg": cfg,
+                        },
+                    )
 
             except Exception as e:
                 db.create_artifact(
@@ -387,13 +598,88 @@ def _job_generate_campaign_pack(job_id: str, campaign_id: str, story_prompt: str
                     text_content=str(e),
                     meta={"comfyui_base_url": comfy_url},
                 )
-        elif comfy_is_configured() and not comfy_ckpt:
+        elif "comfyui" in providers:
             db.create_artifact(
                 campaign_id=campaign_id,
                 kind="text.comfyui_warning",
                 title="ComfyUI not configured (missing checkpoint)",
                 text_content="Set COMFYUI_CHECKPOINT to a checkpoint filename available in ComfyUI (models/checkpoints).",
                 meta={"comfyui_base_url": comfy_url},
+            )
+
+        if "nano-banana" in providers and nano_banana_url:
+            try:
+                resolution = os.getenv("NANO_BANANA_RESOLUTION") or "1K"
+                aspect_ratio = os.getenv("NANO_BANANA_ASPECT_RATIO") or "1:1"
+                thinking = os.getenv("NANO_BANANA_THINKING") or "minimal"
+                timeout_s = float(os.getenv("NANO_BANANA_TIMEOUT_SECONDS") or 900)
+                db.update_job(
+                    job_id=job_id,
+                    status="running",
+                    message="Generating illustrations (Nano Banana MCP)",
+                )
+                with NanoBananaMcpClient(
+                    nano_banana_url,
+                    timeout_s=timeout_s,
+                ) as client:
+                    available_tools = {
+                        tool.get("name") for tool in client.list_tools()
+                    }
+                    if "generate_image" not in available_tools:
+                        raise RuntimeError(
+                            "Nano Banana MCP does not advertise generate_image"
+                        )
+                    for index, brief in enumerate(briefs):
+                        requested_path = (
+                            out_dir
+                            / f"{brief.subject_kind}_illustration_nano_banana_{index}_{job_id}"
+                        )
+                        result = client.generate_image(
+                            prompt=brief.prompt,
+                            destination=requested_path,
+                            aspect_ratio=aspect_ratio,
+                            resolution=resolution,
+                            thinking=thinking,
+                        )
+                        db.create_artifact(
+                            campaign_id=campaign_id,
+                            kind=f"file.{brief.subject_kind}_illustration_image",
+                            title=(
+                                f"{brief.subject_kind.title()} illustration "
+                                f"(Nano Banana): {brief.subject_name}"
+                            ),
+                            file_path=result["path"],
+                            meta={
+                                **brief.metadata,
+                                "provider": "nano-banana",
+                                "prompt": brief.prompt,
+                                "mcp_tool": "generate_image",
+                                "mcp_endpoint": nano_banana_url,
+                                "mime_type": result["mime_type"],
+                                "size_bytes": result["size_bytes"],
+                                "resolution": resolution,
+                                "aspect_ratio": aspect_ratio,
+                                "thinking": thinking,
+                            },
+                        )
+            except Exception as e:
+                db.create_artifact(
+                    campaign_id=campaign_id,
+                    kind="text.nano_banana_warning",
+                    title="Nano Banana image generation warning",
+                    text_content=str(e),
+                    meta={
+                        "provider": "nano-banana",
+                        "mcp_endpoint": nano_banana_url,
+                    },
+                )
+        elif "nano-banana" in providers:
+            db.create_artifact(
+                campaign_id=campaign_id,
+                kind="text.nano_banana_warning",
+                title="Nano Banana not configured",
+                text_content="Set NANO_BANANA_MCP_URL to the Streamable HTTP MCP endpoint.",
+                meta={"provider": "nano-banana"},
             )
 
         # Printable PDF

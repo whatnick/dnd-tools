@@ -1,10 +1,14 @@
 param(
-    [switch]$Recreate
+    [switch]$Recreate,
+    [string]$NanoBananaSource = $env:NANO_BANANA_SOURCE
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $kind = Get-Command kind -ErrorAction Stop
+if (-not $NanoBananaSource) {
+    $NanoBananaSource = "\\wsl.localhost\Ubuntu-22.04\home\tisham\dev\nano-banana-2-mcp-rs"
+}
 
 & $env:ComSpec /c "docker info >nul 2>nul"
 if ($LASTEXITCODE -ne 0) {
@@ -32,9 +36,23 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to build dnd-tools image."
 }
 
+if (-not (Test-Path -LiteralPath $NanoBananaSource)) {
+    throw "Nano Banana MCP source not found at $NanoBananaSource. Set NANO_BANANA_SOURCE or pass -NanoBananaSource."
+}
+
+docker build --tag nano-banana-2-mcp-rs:local $NanoBananaSource
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to build Nano Banana MCP image."
+}
+
 & $kind.Source load docker-image dnd-tools:local --name dnd-tools
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to load the dnd-tools image into kind."
+}
+
+& $kind.Source load docker-image nano-banana-2-mcp-rs:local --name dnd-tools
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to load the Nano Banana MCP image into kind."
 }
 
 kubectl apply --filename "$root\k8s\dnd-tools.yaml"
@@ -45,6 +63,11 @@ if ($LASTEXITCODE -ne 0) {
 kubectl --namespace dnd-tools rollout status deployment/ollama --timeout=10m
 if ($LASTEXITCODE -ne 0) {
     throw "Ollama did not become ready."
+}
+
+kubectl --namespace dnd-tools rollout status deployment/nano-banana-mcp --timeout=5m
+if ($LASTEXITCODE -ne 0) {
+    throw "Nano Banana MCP did not become ready."
 }
 
 kubectl --namespace dnd-tools delete job ollama-pull-campaign-model --ignore-not-found

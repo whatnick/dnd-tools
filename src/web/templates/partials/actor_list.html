@@ -1,0 +1,32 @@
+{% if actors|length == 0 %}
+  <div class="muted">No {{ actor_kind }}s yet.</div>
+{% else %}
+  {% for actor in actors %}
+    <div class="card">
+      <div style="display:flex; gap:12px; align-items:baseline; justify-content:space-between">
+        <strong>{{ actor.name }}</strong>
+        <a href="/actors/{{ actor.id }}.json">JSON</a>
+      </div>
+
+      {% if actor.kind == "character" %}
+        <div>{{ actor.data.ancestry }} {{ actor.data.class_name }} {{ actor.data.level }}</div>
+        <div class="muted">
+          AC {{ actor.data.armor_class }} · HP {{ actor.data.hit_point_max }} ·
+          PB +{{ actor.data.proficiency_bonus }} · Passive Perception {{ actor.data.passive_perception }}
+        </div>
+      {% else %}
+        <div>{{ actor.data.size }} {{ actor.data.creature_type }} · CR {{ actor.data.challenge_rating }}</div>
+        <div class="muted">
+          AC {{ actor.data.armor_class }} · HP {{ actor.data.hit_point_max }} ·
+          PB +{{ actor.data.proficiency_bonus }} · Attack +{{ actor.data.attack_bonus }} ·
+          Save DC {{ actor.data.save_dc }}
+        </div>
+        {% if actor.data.actions %}
+          <div><strong>Actions:</strong> {{ actor.data.actions|join("; ") }}</div>
+        {% endif %}
+      {% endif %}
+
+      <div class="muted">Schema {{ actor.schema_version }}</div>
+    </div>
+  {% endfor %}
+{% endif %}
